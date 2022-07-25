@@ -1,0 +1,30 @@
+Source: thc-ssl-dos
+Section: net
+Priority: optional
+Maintainer: Kali Developers <devel@kali.org>
+Uploaders: Devon Kearns <dookie@kali.org>,
+           Mati Aharoni <muts@kali.org>,
+           Sophie Brun <sophie@offensive-security.com>,
+Build-Depends: debhelper (>= 9), autotools-dev, libpcap-dev, libssl-dev
+Standards-Version: 4.5.1
+Homepage: http://www.thc.org/thc-ssl-dos/
+Vcs-Git: https://gitlab.com/kalilinux/packages/thc-ssl-dos.git
+Vcs-Browser: https://gitlab.com/kalilinux/packages/thc-ssl-dos
+
+Package: thc-ssl-dos
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libpcap0.8, openssl
+Description: Stress tester for the SSL handshake
+ THC-SSL-DOS is a tool to verify the performance of SSL.
+ .
+ Establishing a secure SSL connection requires 15x more processing
+ power on the server than on the client.
+ .
+ THC-SSL-DOS exploits this asymmetric property by overloading the
+ server and knocking it off the Internet.
+ .
+ This problem affects all SSL implementations today. The vendors are aware
+ of this problem since 2003 and the topic has been widely discussed.
+ .
+ This attack further exploits the SSL secure Renegotiation feature
+ to trigger thousands of renegotiations via single TCP connection.

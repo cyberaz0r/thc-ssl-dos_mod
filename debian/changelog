@@ -1,0 +1,32 @@
+thc-ssl-dos (1.4-1kali3) kali-dev; urgency=medium
+
+  [ Raphaël Hertzog ]
+  * Update Maintainer field
+  * Update Vcs-* fields for the move to gitlab.com
+  * Add GitLab's CI configuration file
+  * Configure git-buildpackage for Kali
+  * Update URL in GitLab's CI configuration file
+
+  [ Sophie Brun ]
+  * Bump Standards-Version to 4.5.1
+  * Use compat 9
+
+ -- Sophie Brun <sophie@offensive-security.com>  Wed, 15 Sep 2021 11:59:30 +0200
+
+thc-ssl-dos (1.4-1kali2) kali; urgency=low
+
+  * Updated watch file
+
+ -- Mati Aharoni <muts@kali.org>  Sun, 12 Jan 2014 15:44:31 -0500
+
+thc-ssl-dos (1.4-1kali1) kali; urgency=low
+
+  * Fixed error in the control file
+
+ -- Devon Kearns <dookie@kali.org>  Mon, 24 Dec 2012 11:42:30 -0700
+
+thc-ssl-dos (1.4-1kali0) kali; urgency=low
+
+  * Initial release 
+
+ -- Devon Kearns <dookie@kali.org>  Mon, 24 Dec 2012 10:54:53 -0700

@@ -1,0 +1,13 @@
+version: '2'
+services:
+  web:
+    image: tomcat:6.0.48
+    ports:
+      - 8443:8443
+    environment:
+      - JAVA_OPTS=-Dsun.security.ssl.allowLegacyHelloMessages=false -Dsun.security.ssl.allowUnsafeRenegotiation=true
+    volumes:
+      - ./server.xml:/usr/local/tomcat/conf/server.xml
+      - ./ssl:/usr/local/tomcat/ssl
+      #- ./generate_keystore.sh:/generate_keystore.sh
+    #command: bash /generate_keystore.sh

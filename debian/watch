@@ -1,0 +1,3 @@
+version=4
+
+http://www.thc.org/thc-ssl-dos/ thc-ssl-dos-([\d\.]+)\.(?:tgz|tbz2|txz|tar\.gz|tar\.bz2|tar\.xz)
