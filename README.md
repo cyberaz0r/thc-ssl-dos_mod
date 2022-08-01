@@ -24,6 +24,7 @@ src/thc-ssl-dos -h
 * Cipher list choice (using `-c` or `--cipher` option)
 * Reconnect attack (using `-r` or `--reconnect` option)
 * UDP protocol support (using `DTLSv1` or `DTLSv1_2` on protocol choice)
+* SOCKS5 proxy support (using `-s` or `--socks-proxy` option)
 
 ## Features added
 * A [docker lab](docker-lab-test) (using `docker-compose`) to test the exploit (Tomcat 6.0.48 with self-signed SSL certificate, TLS1.2 and Secure Client-Initiated Renegotiation enabled)

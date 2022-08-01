@@ -33,6 +33,7 @@
 #define DEFAULT_PEERS		(400)
 #define PROGRAM_NAME		"thc-ssl-dos"
 #define TO_TCP_CONNECT		(10)	// 10 second TCP connect() timeout
+#define TO_SOCKS5_CONNECT	(10)
 
 #define FL_SECURE_RENEGOTIATION		(0x01)
 #define FL_UNSECURE_RENEGOTIATION	(0x02)
@@ -81,6 +82,18 @@ enum _protocols {
 	DTLSv1_2
 };
 
+enum _socks5_status {
+	SUCCEEDED = 0x00,
+	GENERAL_SOCKS_SERVER_FAILURE = 0x01,
+	CONNECTION_NOT_ALLOWED_BY_RULESET = 0x02,
+	NETWORK_UNREACHABLE = 0x03,
+	HOST_UNREACHABLE = 0x04,
+	CONNECTION_REFUSED = 0x05,
+	TTL_EXPIRED = 0x06,
+	COMMAND_NOT_SUPPORTED = 0x07,
+	ADDRESS_TYPE_NOT_SUPPORTED = 0x08
+};
+
 struct _statistics {
 	uint32_t total_tcp_connections;
 	uint32_t total_renegotiations;
@@ -98,6 +111,8 @@ struct _opt {
 	uint16_t n_max_peers;
 	uint32_t ip;
 	uint16_t port;
+	uint32_t proxy_ip;
+	uint16_t proxy_port;
 	short reneg_mode;
 	fd_set rfds;
 	fd_set wfds;
@@ -124,6 +139,8 @@ enum _protocols protocols = 0;
 struct _peer peers[MAX_PEERS];
 struct _opt g_opt;
 
+char **split(char *input, char *needle);
+
 static char *int_ntoa(uint32_t ip);
 static uint64_t getusec(struct timeval *tv);
 
@@ -131,6 +148,7 @@ static int tcp_connect_io(struct _peer *p);
 static int tcp_connect_try_finish(struct _peer *p, int ret);
 
 int tcp_connect(struct _peer *p);
+int socks5_connect(struct _peer *p);
 
 static int ssl_connect_io(struct _peer *p);
 static int ssl_handshake_io(struct _peer *p);
